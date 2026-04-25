@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 # 🎓 AI-Based Academic Answer Evaluation System
 
 > Powered by **RAG · FAISS · Groq LLaMA-3 · Sentence Transformers · Streamlit**
