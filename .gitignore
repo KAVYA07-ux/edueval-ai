@@ -1,0 +1,25 @@
+# Environment variables - NEVER upload this
+.env
+
+# Virtual environment
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Database files
+*.db
+*.sqlite
+
+# Vector store (large files, regenerate locally)
+vector_store/
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
