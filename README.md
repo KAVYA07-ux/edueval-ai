@@ -1,41 +1,10 @@
 
-# 🎓 AI-Based Academic Answer Evaluation System
+#  AI-Based Academic Answer Evaluation System
 
 > Powered by **RAG · FAISS · Groq LLaMA-3 · Sentence Transformers · Streamlit**
 
 ---
-
-## 🚀 Quick Start (5 Minutes)
-
-### Step 1 — Get a FREE Groq API Key
-1. Go to [https://console.groq.com](https://console.groq.com)
-2. Sign up (free) → API Keys → Create Key
-3. Copy the key
-
-### Step 2 — Install Dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### Step 3 — Set Your API Key
-```bash
-# Option A: Create a .env file
-cp .env.example .env
-# Edit .env and paste your key
-
-# Option B: Just paste it in the app's sidebar (no file needed)
-```
-
-### Step 4 — Run the App
-```bash
-streamlit run app.py
-```
-
-Open [http://localhost:8501](http://localhost:8501) in your browser.
-
----
-
-## 📁 Project Structure
+##  Project Structure
 
 ```
 answer_evaluator/
@@ -54,7 +23,7 @@ answer_evaluator/
 
 ---
 
-## 🏗️ System Architecture
+##  System Architecture
 
 ```
 OFFLINE (one-time setup):
@@ -74,7 +43,7 @@ ONLINE (per evaluation):
 
 ---
 
-## ✨ Features
+##  Features
 
 | Feature | Description |
 |---------|-------------|
@@ -88,7 +57,7 @@ ONLINE (per evaluation):
 
 ---
 
-## 📊 How Evaluation Works
+##  How Evaluation Works
 
 The LLM receives:
 1. The **question**
@@ -107,7 +76,7 @@ It then returns a structured JSON with:
 
 ---
 
-## 🛠️ Technologies Used
+##  Technologies Used
 
 | Technology | Version | Role |
 |-----------|---------|------|
@@ -122,21 +91,3 @@ It then returns a structured JSON with:
 
 ---
 
-## 💡 Tips for Best Results
-
-1. **Upload relevant PDFs** — the more specific your syllabus material, the better the evaluation
-2. **Clear questions** — specific questions yield better context retrieval
-3. **Chunk quality** — the system uses 500-char chunks with 100-char overlap for optimal retrieval
-
----
-
-## 📝 Sample CSV Format (Batch Mode)
-
-```csv
-student_name,question,student_answer
-Alice,What is RAG?,RAG stands for Retrieval Augmented Generation...
-Bob,Explain FAISS,FAISS is a library for efficient similarity search...
-```
-=======
-Emerging tools Lab Work
->>>>>>> 1a2b3350ade651a153a44dbc49d1cb094333612d
