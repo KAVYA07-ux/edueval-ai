@@ -1,75 +1,125 @@
-<<<<<<< HEAD
-# 🎓 AI-Based Academic Answer Evaluation System
+# 🎓 EduEval AI — Academic Answer Evaluation System
 
-> Powered by **RAG · FAISS · Groq LLaMA-3 · Sentence Transformers · Streamlit**
+> Powered by **RAG · Pinecone · Supabase · Groq LLaMA-3 · Sentence Transformers · Streamlit**
+
+Fully cloud-native: vector index persists in **Pinecone**, evaluation history persists in **Supabase**.  
+No local files — survives every redeploy.
 
 ---
 
-## 🚀 Quick Start (5 Minutes)
+## 🔑 You Need 4 Free API Keys
 
-### Step 1 — Get a FREE Groq API Key
-1. Go to [https://console.groq.com](https://console.groq.com)
-2. Sign up (free) → API Keys → Create Key
-3. Copy the key
+| Service | Free Tier | Get Key |
+|---------|-----------|---------|
+| **Groq** | Unlimited (rate-limited) | [console.groq.com](https://console.groq.com) |
+| **Pinecone** | 1 index · 100K vectors | [app.pinecone.io](https://app.pinecone.io) |
+| **Supabase** | 500 MB DB · unlimited calls | [supabase.com](https://supabase.com) |
 
-### Step 2 — Install Dependencies
+---
+
+## 🗄️ One-Time Supabase Setup
+
+After creating your Supabase project, open the **SQL Editor** and run this once:
+
+```sql
+CREATE TABLE IF NOT EXISTS evaluations (
+    id                BIGSERIAL PRIMARY KEY,
+    created_at        TIMESTAMPTZ DEFAULT NOW(),
+    student_name      TEXT        DEFAULT 'Anonymous',
+    question          TEXT        NOT NULL,
+    student_answer    TEXT        NOT NULL,
+    marks_awarded     INTEGER     NOT NULL,
+    max_marks         INTEGER     NOT NULL,
+    percentage        FLOAT       NOT NULL,
+    grade             TEXT        NOT NULL,
+    concepts_covered  JSONB,
+    concepts_missing  JSONB,
+    strengths         JSONB,
+    weaknesses        JSONB,
+    detailed_feedback TEXT,
+    improved_answer   TEXT,
+    context_used      TEXT
+);
+```
+
+---
+
+## 🚀 Deploy to Streamlit Cloud (Free)
+
+### 1 — Push to GitHub
+```bash
+git init
+git add .
+git commit -m "initial commit"
+git remote add origin https://github.com/YOUR_USERNAME/edueval-ai.git
+git push -u origin main
+```
+
+### 2 — Deploy
+1. Go to [share.streamlit.io](https://share.streamlit.io) → **New app**
+2. Select your repo, set main file to `app.py`
+3. Click **Advanced settings → Secrets** and paste:
+
+```toml
+GROQ_API_KEY     = "gsk_your_key"
+PINECONE_API_KEY = "pcsk_your_key"
+SUPABASE_URL     = "https://xxxx.supabase.co"
+SUPABASE_KEY     = "eyJ_your_anon_key"
+```
+
+4. Click **Deploy** — live in ~2 minutes ✅
+
+---
+
+## 🖥️ Run Locally
+
 ```bash
 pip install -r requirements.txt
-```
-
-### Step 3 — Set Your API Key
-```bash
-# Option A: Create a .env file
-cp .env.example .env
-# Edit .env and paste your key
-
-# Option B: Just paste it in the app's sidebar (no file needed)
-```
-
-### Step 4 — Run the App
-```bash
+cp .env.example .env   # fill in your 4 keys
 streamlit run app.py
 ```
-
-Open [http://localhost:8501](http://localhost:8501) in your browser.
 
 ---
 
 ## 📁 Project Structure
 
 ```
-answer_evaluator/
-│
-├── app.py              ← Main Streamlit UI
-├── rag_engine.py       ← FAISS vector DB + RAG retrieval
+edueval-ai/
+├── app.py              ← Main Streamlit UI (4 tabs)
+├── rag_engine.py       ← Pinecone vector DB + RAG retrieval
 ├── evaluator.py        ← Groq LLM evaluation logic
-├── requirements.txt    ← All dependencies
-├── .env.example        ← API key template
-│
-├── uploaded_pdfs/      ← Auto-created when you upload PDFs
-└── vector_store/       ← Auto-created FAISS index + metadata
-    ├── faiss.index
-    └── metadata.pkl
+├── database.py         ← Supabase evaluation history
+├── prompts.py          ← Prompt builder utility
+├── requirements.txt    ← Python dependencies
+├── packages.txt        ← System deps for Streamlit Cloud
+├── .env.example        ← Local secrets template
+└── .streamlit/
+    ├── config.toml     ← Theme + server config
+    └── secrets.toml    ← Local secrets (never commit!)
 ```
 
 ---
 
-## 🏗️ System Architecture
+## 🏗️ Architecture
 
 ```
 OFFLINE (one-time setup):
-  Syllabus PDFs → Text Extraction → Chunking → Sentence Embeddings → FAISS Index
+  Syllabus PDFs → PyMuPDF → 500-char chunks
+       → Sentence Transformer embeddings (384-dim)
+       → Pinecone upsert (persists forever ☁️)
 
 ONLINE (per evaluation):
   Question + Student Answer
         ↓
-  Embed Question → FAISS Search → Top-K Relevant Chunks
+  Embed → Pinecone cosine search → Top-5 chunks
         ↓
-  Prompt = [System Prompt] + [Question] + [Answer] + [Retrieved Context]
+  Prompt = [System] + [Question] + [Answer] + [Context]
         ↓
-  Groq LLaMA-3 70B
+  Groq LLaMA-3.3 70B → structured JSON
         ↓
-  Marks | Grade | Concepts Covered/Missing | Feedback | Model Answer
+  Supabase INSERT (persists forever ☁️)
+        ↓
+  Marks | Grade | Concepts | Feedback | Model Answer
 ```
 
 ---
@@ -78,65 +128,11 @@ ONLINE (per evaluation):
 
 | Feature | Description |
 |---------|-------------|
-| **PDF Knowledge Base** | Upload any syllabus or textbook PDF |
-| **Semantic Retrieval** | FAISS finds the most relevant reference chunks |
-| **AI Evaluation** | LLM scores based on concept coverage & correctness |
-| **Explainable Results** | Covered concepts, missing concepts, strengths, weaknesses |
-| **Model Answer** | Suggested improved answer for student learning |
-| **Batch Mode** | Evaluate entire class via CSV upload |
-| **Persistent Index** | FAISS index saved to disk — survives app restarts |
-
----
-
-## 📊 How Evaluation Works
-
-The LLM receives:
-1. The **question**
-2. The **student's answer**
-3. **Reference context** retrieved from your uploaded PDFs via semantic search
-
-It then returns a structured JSON with:
-- `marks_awarded` (out of 10)
-- `grade` (A+ to F)
-- `concepts_covered` — what the student got right
-- `concepts_missing` — gaps in the answer
-- `strengths` — positives
-- `weaknesses` — areas to improve
-- `detailed_feedback` — 2-4 sentence constructive feedback
-- `improved_answer` — a model answer the student can learn from
-
----
-
-## 🛠️ Technologies Used
-
-| Technology | Version | Role |
-|-----------|---------|------|
-| Python | 3.10+ | Core language |
-| Streamlit | 1.35 | Web UI |
-| Groq API (LLaMA-3 70B) | latest | LLM evaluation |
-| FAISS | 1.8 | Vector similarity search |
-| Sentence Transformers | 3.0 | Text embeddings |
-| PyMuPDF | 1.24 | PDF text extraction |
-| LangChain Text Splitters | 0.2 | Intelligent text chunking |
-| Plotly | 5.22 | Score visualization |
-
----
-
-## 💡 Tips for Best Results
-
-1. **Upload relevant PDFs** — the more specific your syllabus material, the better the evaluation
-2. **Clear questions** — specific questions yield better context retrieval
-3. **Chunk quality** — the system uses 500-char chunks with 100-char overlap for optimal retrieval
-
----
-
-## 📝 Sample CSV Format (Batch Mode)
-
-```csv
-student_name,question,student_answer
-Alice,What is RAG?,RAG stands for Retrieval Augmented Generation...
-Bob,Explain FAISS,FAISS is a library for efficient similarity search...
-```
-=======
-Emerging tools Lab Work
->>>>>>> 1a2b3350ade651a153a44dbc49d1cb094333612d
+| **Persistent Vector DB** | Pinecone — PDFs indexed once, available across all deployments |
+| **Persistent History** | Supabase — every evaluation stored, never lost on redeploy |
+| **Semantic Retrieval** | Cosine similarity search over syllabus chunks |
+| **AI Evaluation** | Groq LLaMA-3.3 70B scores concept coverage & correctness |
+| **Explainable Results** | Covered/missing concepts, strengths, weaknesses, model answer |
+| **Batch Mode** | Evaluate entire class from a CSV |
+| **Grade Analytics** | Charts + stats across all evaluations |
+| **CSV Export** | Download full history any time |

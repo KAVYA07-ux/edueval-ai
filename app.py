@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 from rag_engine import RAGEngine
 from evaluator  import Evaluator
+from database   import save_evaluation, get_recent_evaluations, get_stats, delete_all
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -21,7 +22,21 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-load_dotenv()
+# Load .env from the same folder as app.py (works regardless of where streamlit is launched from)
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+load_dotenv(dotenv_path=_env_path, override=True)
+
+# Load secrets from st.secrets (Streamlit Cloud) or env (local)
+def _secret(key, default=""):
+    try:
+        return st.secrets.get(key, "") or os.getenv(key, default)
+    except Exception:
+        return os.getenv(key, default)
+
+_groq_default      = _secret("GROQ_API_KEY")
+_pinecone_default  = _secret("PINECONE_API_KEY")
+_supabase_url_def  = _secret("SUPABASE_URL")
+_supabase_key_def  = _secret("SUPABASE_KEY")
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -126,10 +141,6 @@ st.markdown("""
 
 
 # ── Session state ─────────────────────────────────────────────────────────────
-if "rag" not in st.session_state:
-    rag = RAGEngine()
-    rag.load_index()
-    st.session_state.rag = rag
 if "history" not in st.session_state:
     st.session_state.history = []
 
@@ -179,42 +190,61 @@ with st.sidebar:
     st.markdown("<div style='padding:1rem 0 0.5rem;'><div style='font-family:Syne;font-size:1.1rem;font-weight:800;background:linear-gradient(135deg,#58a6ff,#a371f7);-webkit-background-clip:text;-webkit-text-fill-color:transparent;'>EduEval AI</div><div style='font-size:0.75rem;color:#8b949e;'>Academic Answer Evaluator</div></div>", unsafe_allow_html=True)
     st.markdown("---")
     st.markdown('<div class="section-label">Configuration</div>', unsafe_allow_html=True)
-    api_key = st.text_input("Groq API Key", type="password", value=os.getenv("GROQ_API_KEY", ""), placeholder="gsk_...")
-    if api_key: st.success("✓ API key loaded")
+    api_key        = st.text_input("Groq API Key",      type="password", value=_groq_default,     placeholder="gsk_...")
+    pinecone_key   = st.text_input("Pinecone API Key",  type="password", value=_pinecone_default,  placeholder="pcsk_...")
+    supabase_url   = st.text_input("Supabase URL",      value=_supabase_url_def,                   placeholder="https://xxxx.supabase.co")
+    supabase_key   = st.text_input("Supabase Key",      type="password", value=_supabase_key_def,  placeholder="eyJ...")
+
+    _all_keys_set = all([api_key, pinecone_key, supabase_url, supabase_key])
+    if _all_keys_set:
+        st.success("✓ All keys loaded")
     else:
-        st.warning("Enter your Groq API key")
-        st.markdown("[Get free key →](https://console.groq.com)")
+        missing = [n for n, v in [("Groq", api_key),("Pinecone", pinecone_key),("Supabase URL", supabase_url),("Supabase Key", supabase_key)] if not v]
+        st.warning(f"Missing: {', '.join(missing)}")
 
     st.markdown("---")
     st.markdown('<div class="section-label">Knowledge Base</div>', unsafe_allow_html=True)
-    rag: RAGEngine = st.session_state.rag
-    ca, cb = st.columns(2)
-    ca.metric("Chunks", rag.total_chunks)
-    cb.metric("Status", "Ready" if rag.total_chunks > 0 else "Empty")
-    uploaded = st.file_uploader("Upload syllabus PDFs", type=["pdf"], accept_multiple_files=True)
-    if uploaded:
-        if st.button("Index PDFs", use_container_width=True, type="primary"):
-            prog = st.progress(0)
-            paths = []
-            os.makedirs("uploaded_pdfs", exist_ok=True)
-            for i, f in enumerate(uploaded):
-                dest = f"uploaded_pdfs/{f.name}"
-                with open(dest, "wb") as out: out.write(f.read())
-                paths.append(dest)
-                prog.progress((i+1)/len(uploaded)*0.4)
-            with st.spinner("Generating embeddings…"):
-                n = rag.add_documents(paths)
-                prog.progress(1.0)
-            st.success(f"Indexed {n} chunks!")
-            st.rerun()
-    if rag.total_chunks > 0:
-        if st.button("Clear Knowledge Base", use_container_width=True):
-            rag.clear_index(); st.rerun()
+
+    # Init RAGEngine only when Pinecone key is available
+    if pinecone_key and "rag" not in st.session_state:
+        with st.spinner("Connecting to Pinecone…"):
+            st.session_state.rag = RAGEngine(pinecone_key)
+    rag: RAGEngine = st.session_state.get("rag", None)
+    if rag:
+        ca, cb = st.columns(2)
+        ca.metric("Chunks", rag.total_chunks)
+        cb.metric("Status", "Ready" if rag.total_chunks > 0 else "Empty")
+        uploaded = st.file_uploader("Upload syllabus PDFs", type=["pdf"], accept_multiple_files=True)
+        if uploaded:
+            if st.button("Index PDFs", use_container_width=True, type="primary"):
+                prog = st.progress(0)
+                paths = []
+                os.makedirs("uploaded_pdfs", exist_ok=True)
+                for i, f in enumerate(uploaded):
+                    dest = f"uploaded_pdfs/{f.name}"
+                    with open(dest, "wb") as out: out.write(f.read())
+                    paths.append(dest)
+                    prog.progress((i+1)/len(uploaded)*0.4)
+                with st.spinner("Generating embeddings and uploading to Pinecone…"):
+                    n = rag.add_documents(paths)
+                    prog.progress(1.0)
+                st.success(f"Indexed {n} chunks into Pinecone!")
+                st.rerun()
+        if rag.total_chunks > 0:
+            if st.button("Clear Knowledge Base", use_container_width=True):
+                rag.clear_index(); st.rerun()
+    else:
+        st.info("Enter your Pinecone API key above to connect the knowledge base.")
 
     st.markdown("---")
     st.markdown('<div class="section-label">Recent Evaluations</div>', unsafe_allow_html=True)
-    if st.session_state.history:
-        for h in reversed(st.session_state.history[-5:]):
+    stats = get_stats(supabase_url, supabase_key) if (supabase_url and supabase_key) else {"total":0}
+    if stats["total"] > 0:
+        sa, sb = st.columns(2)
+        sa.metric("Total Evals", stats["total"])
+        sb.metric("Avg Score", f"{stats['avg_pct']}%")
+        recent = get_recent_evaluations(supabase_url, supabase_key, 5)
+        for h in recent:
             g = h["grade"]
             st.markdown(f"<div style='display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #21262d;font-size:0.82rem;'><span style='color:#c8c8d8;'>{h['question'][:28]}…</span><span style='color:{grade_color(g)};font-weight:700;'>{g}</span></div>", unsafe_allow_html=True)
     else:
@@ -236,20 +266,21 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-tab1, tab2, tab3 = st.tabs(["  📝  Evaluate Answer  ", "  📦  Batch Evaluation  ", "  🏗️  Architecture  "])
+tab1, tab2, tab3, tab4 = st.tabs(["  📝  Evaluate Answer  ", "  📦  Batch Evaluation  ", "  📊  History  ", "  🏗️  Architecture  "])
 
 with tab1:
     left, right = st.columns([1, 1], gap="large")
     with left:
         st.markdown('<div class="section-label">Input</div>', unsafe_allow_html=True)
+        student_name = st.text_input("Student Name (optional)", placeholder="e.g. Alice")
         question = st.text_area("Question", placeholder="e.g. Explain Retrieval-Augmented Generation and its applications.", height=110)
         answer   = st.text_area("Student's Answer", placeholder="Paste the student's descriptive answer here…", height=200)
         max_marks = st.select_slider("Max Marks", options=[5, 10, 15, 20], value=10)
-        evaluate  = st.button("🚀  Evaluate Answer", use_container_width=True, type="primary", disabled=not api_key)
+        evaluate  = st.button("🚀  Evaluate Answer", use_container_width=True, type="primary", disabled=not _all_keys_set)
 
     with right:
         st.markdown('<div class="section-label">Retrieved Context</div>', unsafe_allow_html=True)
-        if question:
+        if question and rag:
             hits = rag.retrieve(question, top_k=3)
             if hits:
                 for h in hits:
@@ -265,7 +296,7 @@ with tab1:
             st.error("Please enter both a question and a student answer.")
         else:
             with st.spinner("Retrieving context and evaluating…"):
-                context   = rag.get_context(question)
+                context   = rag.get_context(question) if rag else ""
                 evaluator = Evaluator(api_key)
                 t0        = time.time()
                 result    = evaluator.evaluate(question, answer, context)
@@ -279,6 +310,17 @@ with tab1:
                 result["max_marks"]     = max_marks
                 grade = result["grade"]
                 st.session_state.history.append({"question": question, "grade": grade, "marks": result["marks_awarded"]})
+                # ── Persist to Supabase ───────────────────────────────────
+                try:
+                    saved_id = save_evaluation(supabase_url, supabase_key, result, question, answer,
+                                    student_name=student_name or "Anonymous",
+                                    context=context)
+                    if saved_id:
+                        st.toast(f"✅ Saved to history (id={saved_id})")
+                    else:
+                        st.warning("⚠️ Evaluation complete but failed to save to history. Check terminal for errors.")
+                except Exception as _db_err:
+                    st.warning(f"⚠️ DB error: {_db_err}")
 
                 st.markdown("---")
                 st.markdown('<div class="section-label">Evaluation Results</div>', unsafe_allow_html=True)
@@ -343,6 +385,58 @@ with tab2:
             st.plotly_chart(fig, use_container_width=True)
 
 with tab3:
+    st.markdown('<div class="section-label">Evaluation History</div>', unsafe_allow_html=True)
+    history = get_recent_evaluations(supabase_url, supabase_key, 100) if (supabase_url and supabase_key) else []
+    if not history:
+        st.info("No evaluations stored yet. Run an evaluation to see history here.")
+    else:
+        stats = get_stats(supabase_url, supabase_key)
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Evaluations", stats["total"])
+        m2.metric("Average Score", f"{stats['avg_pct']}%")
+        m3.metric("Highest Score", stats["top_score"])
+        m4.metric("Lowest Score", stats["low_score"])
+
+        # Grade distribution chart
+        if stats["grades"]:
+            gc = stats["grades"]
+            fig = go.Figure(go.Bar(
+                x=list(gc.keys()), y=list(gc.values()),
+                marker_color=[grade_color(g) for g in gc.keys()],
+                marker_line_width=0,
+            ))
+            fig.update_layout(
+                title="Grade Distribution (All Time)",
+                paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
+                font={"color": "#e8e8f0"}, height=280,
+                xaxis={"gridcolor": "#21262d"}, yaxis={"gridcolor": "#21262d"},
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        # History table
+        import pandas as pd
+        hdf = pd.DataFrame([{
+            "Date":    h["created_at"],
+            "Student": h["student_name"],
+            "Question": h["question"][:60] + "…",
+            "Marks":   f"{h['marks_awarded']}/{h['max_marks']}",
+            "Grade":   h["grade"],
+            "Score %": h["percentage"],
+            "Feedback": h["detailed_feedback"][:80] + "…",
+        } for h in history])
+        st.dataframe(hdf, use_container_width=True, height=400)
+        st.download_button(
+            "📥 Export Full History CSV",
+            hdf.to_csv(index=False),
+            "eval_history.csv",
+            "text/csv",
+        )
+        if st.button("🗑️ Clear All History", type="secondary"):
+            delete_all(supabase_url, supabase_key)
+            st.success("History cleared.")
+            st.rerun()
+
+with tab4:
     st.markdown('<div class="section-label">System Architecture</div>', unsafe_allow_html=True)
     st.markdown("""<div class="fb-box" style="font-family:monospace;font-size:0.82rem;line-height:1.8;white-space:pre">
 ┌─────────────────────────────────────────────────────────┐
